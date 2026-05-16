@@ -14,11 +14,7 @@ import multiprocessing
 import importlib
 import warnings
 
-# -------------------------
-# Configuration
-# -------------------------
 HERE = os.path.dirname(__file__) or "."
-# candidate folder names for the local pspnet implementation
 PSPNET_CANDIDATES = [
     os.path.join(HERE, "pspnet-pytorch"),
     os.path.join(HERE, "pspnet_pytorch"),
@@ -38,12 +34,8 @@ LEARNING_RATE = 1e-4
 NUM_WORKERS = 0
 SAVE_PATH = os.path.join(HERE, "pspnet_model.pth")
 
-# fixed input size (height, width)
-TARGET_SIZE = (512, 512)  # change to 256/384/768 depending on GPU memory
+TARGET_SIZE = (512, 512)
 
-# -------------------------
-# Robust import of local pspnet.py
-# -------------------------
 pspnet_folder = None
 for c in PSPNET_CANDIDATES:
     if os.path.isdir(c):
@@ -51,7 +43,6 @@ for c in PSPNET_CANDIDATES:
         break
 
 if pspnet_folder is None:
-    # fallback: search for any folder that contains pspnet.py
     for name in os.listdir(HERE):
         path = os.path.join(HERE, name)
         if os.path.isdir(path) and "pspnet.py" in os.listdir(path):
@@ -62,7 +53,6 @@ if pspnet_folder is None:
     raise FileNotFoundError(f"pspnet folder not found. Searched: {PSPNET_CANDIDATES} and top-level folders in {HERE}")
 
 sys.path.insert(0, pspnet_folder)
-# debug prints (safe to remove later)
 print("DEBUG: HERE =", HERE)
 print("DEBUG: PSPNET_FOLDER =", pspnet_folder)
 print("DEBUG: sys.path[0] =", sys.path[0])
@@ -71,9 +61,6 @@ print("DEBUG: files in pspnet folder:", os.listdir(pspnet_folder))
 pspnet = importlib.import_module("pspnet")
 PSPNet = getattr(pspnet, "PSPNet")
 
-# -------------------------
-# Dataset
-# -------------------------
 class COCOSegmentationDataset(Dataset):
     def __init__(self, json_file, img_dir):
         self.coco = COCO(json_file)
@@ -99,7 +86,6 @@ class COCOSegmentationDataset(Dataset):
         ann_ids = self.coco.getAnnIds(imgIds=img_id)
         anns = self.coco.loadAnns(ann_ids)
 
-        # build empty mask
         mask = np.zeros((img_info["height"], img_info["width"]), dtype=np.uint8)
 
         for ann in anns:
@@ -109,7 +95,6 @@ class COCOSegmentationDataset(Dataset):
                     continue
 
                 if ann.get("iscrowd", 0) == 1:
-                    # segm may already be RLE dict or list
                     if isinstance(segm, list):
                         rle = maskUtils.frPyObjects(segm, img_info["height"], img_info["width"])
                     else:
@@ -117,7 +102,6 @@ class COCOSegmentationDataset(Dataset):
                     seg = maskUtils.decode(rle)
                 else:
                     if isinstance(segm, list) and len(segm) == 0:
-                        # empty polygon list, skip
                         continue
                     rles = maskUtils.frPyObjects(segm, img_info["height"], img_info["width"])
                     seg = maskUtils.decode(rles)
@@ -138,20 +122,15 @@ class COCOSegmentationDataset(Dataset):
                 print(f"WARNING: skipping ann id {ann.get('id')} for img {img_id} due to error: {e}")
                 continue
 
-        # --- resize image and mask to TARGET_SIZE ---
         target_h, target_w = TARGET_SIZE
         img_resized = cv2.resize(img, (target_w, target_h), interpolation=cv2.INTER_LINEAR)
         mask_resized = cv2.resize(mask, (target_w, target_h), interpolation=cv2.INTER_NEAREST)
 
-        # convert to tensors
         img_tensor = transforms.ToTensor()(img_resized)
         mask_tensor = torch.from_numpy(mask_resized).long()
 
         return img_tensor, mask_tensor
 
-# -------------------------
-# Helpers
-# -------------------------
 def extract_logits(model_output):
     if isinstance(model_output, dict):
         return model_output.get("out", list(model_output.values())[0])
@@ -178,11 +157,7 @@ def evaluate(model, loader, criterion, device, split_name="Val"):
     print(f"{split_name} Loss: {avg_loss:.4f}")
     return avg_loss
 
-# -------------------------
-# Main
-# -------------------------
 def main():
-    # sanity checks for JSONs and image dir
     for path in [TRAIN_JSON, VAL_JSON, TEST_JSON]:
         if not os.path.exists(path):
             raise FileNotFoundError(f"JSON not found: {path}")
@@ -232,12 +207,10 @@ def main():
         avg_train_loss = train_loss / max(1, len(train_loader))
         print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] Train Loss: {avg_train_loss:.4f}")
 
-        # evaluate on val
         evaluate(model, val_loader, criterion, device, split_name="Val")
 
         torch.save(model.state_dict(), SAVE_PATH)
 
-    # final test evaluation
     print("Final evaluation on test set:")
     evaluate(model, test_loader, criterion, device, split_name="Test")
 
